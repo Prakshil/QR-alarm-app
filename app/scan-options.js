@@ -32,59 +32,104 @@ export default function ScanOptionsScreen() {
         input.type = 'file';
         input.accept = 'image/*';
         input.onchange = async (e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          const url = URL.createObjectURL(file);
-          const decoded = await decodeWebQr(url);
-          await verifyAndStop(decoded);
+          try {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            
+            // Validate file type
+            if (!file.type.startsWith('image/')) {
+              Alert.alert('Invalid File', 'Please select an image file.');
+              return;
+            }
+            
+            const url = URL.createObjectURL(file);
+            const decoded = await decodeWebQr(url);
+            await verifyAndStop(decoded);
+          } catch (webError) {
+            console.error('Web QR decode error:', webError);
+            Alert.alert('Decode Error', 'Could not decode QR from this image. Please try a different image.');
+          }
         };
         input.click();
       } else {
         const DocumentPicker = require('expo-document-picker');
-        const res = await DocumentPicker.getDocumentAsync({ type: 'image/*', copyToCacheDirectory: true });
+        const res = await DocumentPicker.getDocumentAsync({ 
+          type: 'image/*', 
+          copyToCacheDirectory: true 
+        });
+        
         if (res.canceled) return;
+        
         const uri = res?.assets?.[0]?.uri;
-        if (!uri) return;
+        if (!uri) {
+          Alert.alert('No Image Selected', 'Please select an image to scan.');
+          return;
+        }
+
         let QRLocalImage = null;
-        try { QRLocalImage = require('react-native-qrcode-local-image'); } catch {}
+        try { 
+          QRLocalImage = require('react-native-qrcode-local-image'); 
+        } catch (importError) {
+          console.log('QRLocalImage import error:', importError);
+        }
+        
         if (!QRLocalImage?.decode) {
           Alert.alert(
-            'Unsupported in Expo Go',
-            'Decoding a QR from an image requires a development build. Please use the camera option for now.'
+            'Feature Not Available',
+            'QR scanning from images is not available in Expo Go. Please use the camera scanner instead, or build a development version of the app.'
           );
           return;
         }
-        const decoded = await QRLocalImage.decode(uri);
-        await verifyAndStop(decoded);
+        
+        try {
+          const decoded = await QRLocalImage.decode(uri);
+          await verifyAndStop(decoded);
+        } catch (decodeError) {
+          console.error('QR decode error:', decodeError);
+          Alert.alert('Decode Failed', 'Could not read QR code from this image. Please try:\n• A clearer image\n• Better image quality\n• Ensure the QR code is fully visible');
+        }
       }
     } catch (e) {
-      Alert.alert('Upload failed', String(e?.message || e));
+      console.error('Upload error:', e);
+      Alert.alert('Upload Failed', 'Error selecting image: ' + (e?.message || e));
     }
   };
 
   const verifyAndStop = async (data) => {
     try {
-      if (!data) return Alert.alert('No QR found', 'Could not read a QR from the image.');
+      console.log('Decoded QR data:', data);
+      
+      // Handle null/undefined/empty data
+      if (!data || data === null || data === undefined || data === '') {
+        Alert.alert('No QR Code Found', 'Could not read a QR code from this image. Please try:\n• A clearer image\n• Better lighting\n• Ensure the QR code is fully visible');
+        return;
+      }
+
       const my = await loadMyQrCode();
+      console.log('My QR code:', my);
+      
       if (!my) {
-        Alert.alert('No profile QR', 'Create your profile first to bind a QR to this device.');
+        Alert.alert('Setup Required', 'Please go to Profile tab and generate your QR code first.');
         return;
       }
-      if (data !== my) {
-        Alert.alert('❌ Not your QR', 'This QR belongs to another user or device.');
+      
+      if (String(data) !== String(my)) {
+        Alert.alert('❌ Wrong QR Code', 'This QR code doesn\'t match your profile. Make sure you\'re scanning your own QR code.');
         return;
       }
+      
       const row = await verifyQr(data);
       if (row) {
         const { emitAlarmStop } = require('../src/lib/alarmBus');
         emitAlarmStop();
-        Alert.alert('✅ Success', 'Alarm stopped!');
+        Alert.alert('✅ Success', 'Alarm stopped successfully!');
         router.back();
       } else {
-        Alert.alert('❌ Invalid', 'Wrong QR Code!');
+        Alert.alert('❌ Verification Failed', 'QR code could not be verified. Please try again.');
       }
     } catch (e) {
-      Alert.alert('Error', String(e?.message || e));
+      console.error('QR verification error:', e);
+      Alert.alert('Error', 'An error occurred while processing the QR code: ' + (e?.message || e));
     }
   };
 

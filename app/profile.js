@@ -45,7 +45,15 @@ export default function ProfileScreen() {
       
       if (signInResult.session) {
         setSession(signInResult.session);
-        Alert.alert("Success", "Signed in successfully!");
+        Alert.alert("Welcome back!", "Successfully signed in! You can generate and download your QR code.", [
+          {
+            text: "OK",
+            onPress: () => {
+              setEmail("");
+              setPassword("");
+            }
+          }
+        ]);
       } else {
         Alert.alert("Error", "Failed to sign in. Please check your credentials.");
       }
@@ -81,29 +89,52 @@ export default function ProfileScreen() {
       if (signUpResult.session) {
         console.log('Got session from signup');
         // Create profile row for new user
-        await createProfileRow(signUpResult.session.user.id);
+        try {
+          await createProfileRow(signUpResult.session.user.id);
+        } catch (profileError) {
+          console.log('Profile creation error (might already exist):', profileError);
+        }
         setSession(signUpResult.session);
-        Alert.alert("Success", "Account created! You can now generate your QR code.");
+        Alert.alert("Welcome!", "Account created successfully! You can now generate and download your unique QR code.", [
+          {
+            text: "OK",
+            onPress: () => {
+              // Clear form fields
+              setEmail("");
+              setPassword("");
+            }
+          }
+        ]);
       } else if (signUpResult.user && !signUpResult.session) {
         console.log('User created but no session, trying to sign in');
-        // User was created but no session (email confirmation might be required)
-        // Try to sign in immediately
+        // User was created but no session - try to sign in immediately
         try {
           const signInResult = await signIn(email, password);
           console.log('Sign in result:', signInResult);
           
           if (signInResult.session) {
-            await createProfileRow(signInResult.session.user.id);
+            try {
+              await createProfileRow(signInResult.session.user.id);
+            } catch (profileError) {
+              console.log('Profile creation error (might already exist):', profileError);
+            }
             setSession(signInResult.session);
-            Alert.alert("Success", "Account created! You can now generate your QR code.");
+            Alert.alert("Welcome!", "Account created successfully! You can now generate and download your unique QR code.", [
+              {
+                text: "OK",
+                onPress: () => {
+                  setEmail("");
+                  setPassword("");
+                }
+              }
+            ]);
           } else {
-            // No session but user exists, might need confirmation
-            Alert.alert("Account Created", "Please check your email for confirmation, then sign in.");
+            Alert.alert("Account Created", "Account created successfully! Please sign in with your credentials.");
             setIsSignUp(false);
           }
         } catch (signInError) {
           console.log('Auto sign in failed:', signInError);
-          Alert.alert("Account Created", "Please try signing in with your credentials.");
+          Alert.alert("Account Created", "Account created successfully! Please sign in with your credentials.");
           setIsSignUp(false);
         }
       }
@@ -183,28 +214,67 @@ export default function ProfileScreen() {
 
       svg.toDataURL((data) => {
         if (Platform.OS === "android" || Platform.OS === "ios") {
-          const MediaLibrary = require("expo-media-library");
-          const FileSystem = require("expo-file-system");
-
           (async () => {
             try {
-              const { status } = await MediaLibrary.requestPermissionsAsync();
-              if (status !== "granted") {
-                Alert.alert("Error", "Permission denied to save to gallery");
+              // Check if we're in Expo Go
+              const Constants = require("expo-constants");
+              const isExpoGo = Constants.appOwnership === 'expo';
+              
+              if (isExpoGo) {
+                Alert.alert(
+                  "Limited in Expo Go", 
+                  "QR code saving to gallery is limited in Expo Go. You can:\n\n• Take a screenshot instead\n• Share the QR code via other apps\n• Build a development version for full functionality",
+                  [
+                    { text: "OK", style: "default" },
+                    { text: "Share QR", onPress: () => shareQRCode(data) }
+                  ]
+                );
                 return;
               }
 
+              const MediaLibrary = require("expo-media-library");
+              const FileSystem = require("expo-file-system");
+
+              // Request permissions
+              const { status } = await MediaLibrary.requestPermissionsAsync();
+              if (status !== "granted") {
+                Alert.alert(
+                  "Permission Required", 
+                  "Please allow access to photos to save your QR code.",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Open Settings", onPress: () => require("react-native").Linking.openSettings() }
+                  ]
+                );
+                return;
+              }
+
+              // Create and save file
               const filename = `${FileSystem.documentDirectory}qr-code-${Date.now()}.png`;
               await FileSystem.writeAsStringAsync(filename, data, {
                 encoding: FileSystem.EncodingType.Base64,
               });
 
               const asset = await MediaLibrary.createAssetAsync(filename);
-              await MediaLibrary.createAlbumAsync("QR Codes", asset, false);
-              Alert.alert("Success", "QR code saved to gallery!");
+              try {
+                await MediaLibrary.createAlbumAsync("QR Codes", asset, false);
+              } catch {
+                // Album creation might fail, but asset is still saved
+              }
+              
+              Alert.alert("Success", "QR code saved to your photos!");
             } catch (error) {
               console.error("Save error:", error);
-              Alert.alert("Error", "Failed to save QR code");
+              
+              // Provide helpful error messages
+              if (error.message?.includes("AUDIO")) {
+                Alert.alert(
+                  "Expo Go Limitation", 
+                  "Media library access is limited in Expo Go. Please use a development build for full functionality, or take a screenshot instead."
+                );
+              } else {
+                Alert.alert("Error", `Failed to save QR code: ${error.message || 'Unknown error'}`);
+              }
             }
           })();
         }
@@ -212,6 +282,30 @@ export default function ProfileScreen() {
     } catch (error) {
       console.error("QR generation error:", error);
       Alert.alert("Error", "Failed to generate QR code for saving");
+    }
+  };
+
+  const shareQRCode = async (base64Data) => {
+    try {
+      const Sharing = require("expo-sharing");
+      const FileSystem = require("expo-file-system");
+      
+      const filename = `${FileSystem.cacheDirectory}qr-code-${Date.now()}.png`;
+      await FileSystem.writeAsStringAsync(filename, base64Data, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(filename, {
+          mimeType: 'image/png',
+          dialogTitle: 'Share your QR Code'
+        });
+      } else {
+        Alert.alert("Info", "Sharing not available on this device");
+      }
+    } catch (error) {
+      console.error("Share error:", error);
+      Alert.alert("Error", "Failed to share QR code");
     }
   };
 
@@ -318,6 +412,13 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
       ) : null}
+      
+      {/* Expo Go Limitations Info */}
+      <View style={{ marginTop: 16, backgroundColor: '#1a1a1a', padding: 12, borderRadius: 8, borderLeftWidth: 3, borderLeftColor: '#ffb26b' }}>
+        <ThemedText style={{ color: '#ffb26b', fontSize: 14, lineHeight: 20 }}>
+          💡 <ThemedText style={{ fontWeight: '600' }}>Using Expo Go?</ThemedText> Some features like QR saving have limitations. For full functionality, create a development build or take screenshots as needed.
+        </ThemedText>
+      </View>
     </ThemedView>
   );
 }

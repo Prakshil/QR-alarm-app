@@ -40,21 +40,49 @@ export default function PermissionsModal({ visible, onClose, onAllGranted }) {
   useEffect(() => { if (visible) refresh(); }, [visible]);
 
   useEffect(() => {
-    // In a perfect world we want all three; in Expo Go, camera/media may not fully grant.
+    // Check if all critical permissions are granted
     const allGranted = notif === 'granted' && camera === 'granted' && media === 'granted';
-    const criticalGranted = notif === 'granted';
-    if (allGranted || criticalGranted) {
+    if (allGranted) {
       onAllGranted?.();
       onClose?.();
     }
   }, [notif, camera, media]);
 
   const requestAll = async () => {
-    try { await Notifications.requestPermissionsAsync(); } catch {}
-    try { if (BarCodeScanner) await BarCodeScanner.requestPermissionsAsync(); } catch {}
-    try { if (MediaLibrary) await MediaLibrary.requestPermissionsAsync(); } catch {}
-    await refresh();
-    // Close regardless to avoid trapping users in Expo Go; backend checks will prompt again if missing later
+    try {
+      // Check if we're in Expo Go
+      const Constants = require("expo-constants");
+      const isExpoGo = Constants.appOwnership === 'expo';
+      
+      if (isExpoGo) {
+        const { Alert } = require('react-native');
+        Alert.alert(
+          "Limited in Expo Go", 
+          "Some permissions are limited in Expo Go:\n\n• Notifications work with limitations\n• Camera works for scanning\n• Media library has restrictions\n\nFor full functionality, create a development build.",
+          [
+            { text: "Continue Anyway", onPress: async () => {
+              try { await Notifications.requestPermissionsAsync(); } catch {}
+              try { if (BarCodeScanner) await BarCodeScanner.requestPermissionsAsync(); } catch {}
+              // Skip media library in Expo Go to avoid errors
+              await refresh();
+              onClose?.();
+            }},
+            { text: "Learn More", onPress: () => require('react-native').Linking.openURL('https://docs.expo.dev/develop/development-builds/introduction/') }
+          ]
+        );
+        return;
+      }
+      
+      // Normal permission flow for development builds
+      await Notifications.requestPermissionsAsync();
+      if (BarCodeScanner) await BarCodeScanner.requestPermissionsAsync();
+      if (MediaLibrary) await MediaLibrary.requestPermissionsAsync();
+      await refresh();
+    } catch (error) {
+      console.error("Permission request error:", error);
+    }
+    
+    // Close regardless to avoid trapping users
     onClose?.();
   };
 
@@ -79,7 +107,26 @@ export default function PermissionsModal({ visible, onClose, onAllGranted }) {
           </ThemedText>
           <Row title="Notifications" status={notif} onPress={async () => { try { await Notifications.requestPermissionsAsync(); } catch {} refresh(); }} />
           <Row title="Camera" status={camera} onPress={async () => { try { if (BarCodeScanner) await BarCodeScanner.requestPermissionsAsync(); } catch {} refresh(); }} />
-          <Row title="Photos / Media" status={media} onPress={async () => { try { if (MediaLibrary) await MediaLibrary.requestPermissionsAsync(); } catch {} refresh(); }} />
+          <Row title="Photos / Media" status={media} onPress={async () => { 
+            try { 
+              const Constants = require("expo-constants");
+              const isExpoGo = Constants.appOwnership === 'expo';
+              
+              if (isExpoGo) {
+                const { Alert } = require('react-native');
+                Alert.alert(
+                  "Limited in Expo Go", 
+                  "Media library access is limited in Expo Go. You can still use the app, but QR code saving may not work. Use a development build for full functionality."
+                );
+                return;
+              }
+              
+              if (MediaLibrary) await MediaLibrary.requestPermissionsAsync(); 
+            } catch (error) {
+              console.log("Media permission error:", error);
+            } 
+            refresh(); 
+          }} />
 
           <View style={{ height: 12 }} />
           <TouchableOpacity onPress={requestAll} style={{ backgroundColor: '#121212', padding: 14, borderRadius: 12, alignItems: 'center' }}>

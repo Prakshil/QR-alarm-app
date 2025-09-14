@@ -3,7 +3,7 @@
 import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
 import React, { useRef, useState } from "react";
-import { Alert, AppState, FlatList, Platform, StyleSheet, Switch, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, AppState, FlatList, Platform, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import PermissionsModal from "../components/permissions-modal";
 import { ThemedText } from "../components/themed-text";
 import { ThemedView } from "../components/themed-view";
@@ -63,7 +63,11 @@ function Wheel({ count, value, onChange, step = 1 }) {
 }
 
 function formatTime(date) {
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  const displayHours = hours % 12 || 12;
+  return `${displayHours}:${minutes.toString().padStart(2, '0')} ${ampm}`;
 }
 
 function hasRepeat(days) {
@@ -425,14 +429,38 @@ export default function AlarmScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <View style={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: 8 }}>
+      {/* Current Time Display */}
+      <View style={styles.currentTimeContainer}>
+        {Platform.OS === 'ios' ? (
+          <Text 
+            style={styles.currentTimeText}
+            adjustsFontSizeToFit={true}
+            numberOfLines={1}
+            minimumFontScale={0.7}
+          >
+            {formatTime(ringNow)}
+          </Text>
+        ) : (
+          <ThemedText style={styles.currentTimeText}>
+            {formatTime(ringNow)}
+          </ThemedText>
+        )}
+        <ThemedText style={{ fontSize: 16, color: '#8b8f93', textAlign: 'center', marginTop: 4 }}>
+          {ringNow.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}
+        </ThemedText>
+      </View>
+
+      {/* Next Alarm Info */}
+      <View style={{ paddingHorizontal: 24, paddingBottom: 16 }}>
         {eta ? (
           <>
-            <ThemedText style={{ fontSize: 28, fontWeight: '700', color: '#ffb26b', textAlign: 'center' }}>Alarm in {eta}</ThemedText>
-            <ThemedText style={{ textAlign: 'center', color: '#8b8f93', marginTop: 6 }}>{nextAlarm.time.toLocaleString([], { weekday: 'short', day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' })}</ThemedText>
+            <ThemedText style={{ fontSize: 18, fontWeight: '600', color: '#ffb26b', textAlign: 'center' }}>Next alarm in {eta}</ThemedText>
+            <ThemedText style={{ textAlign: 'center', color: '#8b8f93', marginTop: 4, fontSize: 14 }}>
+              {nextAlarm.time.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}
+            </ThemedText>
           </>
         ) : (
-          <ThemedText style={{ fontSize: 20, color: '#8b8f93', textAlign: 'center' }}>No upcoming alarms</ThemedText>
+          <ThemedText style={{ fontSize: 16, color: '#8b8f93', textAlign: 'center' }}>No upcoming alarms</ThemedText>
         )}
       </View>
       <FlatList
@@ -579,7 +607,7 @@ export default function AlarmScreen() {
 
       {ringVisible && pendingAlarm && (
         <View style={styles.ringOverlay}>
-          <ThemedText style={styles.ringTime}>{ringNow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</ThemedText>
+          <ThemedText style={styles.ringTime}>{formatTime(ringNow)}</ThemedText>
           {!!pendingAlarm.label && (
             <ThemedText style={styles.ringLabel}>{pendingAlarm.label}</ThemedText>
           )}
@@ -602,6 +630,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     paddingTop: 60,
     paddingHorizontal: 0,
+  },
+  currentTimeContainer: {
+    paddingHorizontal: 24,
+    paddingTop: 40,
+    paddingBottom: 20,
+    alignItems: 'center',
+    width: '100%',
+    overflow: 'visible',
+  },
+  currentTimeText: {
+    fontSize: 48,
+    fontWeight: '800',
+    color: '#fff',
+    textAlign: 'center',
+    letterSpacing: -0.5,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
+    lineHeight: 56,
+    width: '100%',
+    flexShrink: 0,
   },
   header: {
     textAlign: 'center',
@@ -683,9 +730,12 @@ const styles = StyleSheet.create({
   ringTime: {
     fontSize: 72,
     fontWeight: '800',
-    letterSpacing: 2,
+    letterSpacing: 1,
     color: '#fff',
     textAlign: 'center',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'monospace',
+    minWidth: 280,
+    flexShrink: 0,
   },
   ringLabel: {
     color: '#9BA1A6',
