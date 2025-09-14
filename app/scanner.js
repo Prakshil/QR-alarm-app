@@ -36,8 +36,16 @@ export default function ScannerScreen() {
     }
   };
 
-  if (hasPermission === null) return <ThemedText>Requesting camera permission...</ThemedText>;
-  if (hasPermission === false || !BarCodeScanner) return <ThemedText>No access to camera</ThemedText>;
+  if (hasPermission === null) return (
+    <ThemedView style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
+      <ThemedText>Requesting camera permission...</ThemedText>
+    </ThemedView>
+  );
+  if (hasPermission === false || !BarCodeScanner) return (
+    <ThemedView style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
+      <ThemedText>No access to camera</ThemedText>
+    </ThemedView>
+  );
 
   return (
     <ThemedView style={{ flex: 1, backgroundColor: '#000' }}>

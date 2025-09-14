@@ -18,8 +18,8 @@ export default function AppLayout() {
     >
       <Tabs.Screen name="alarm" options={{ title: "Alarms" }} />
       <Tabs.Screen name="profile" options={{ title: "Profile" }} />
-      <Tabs.Screen name="scanner" options={{ title: "Scan QR" }} />
-      <Tabs.Screen name="scan-options" options={{ title: "Scan Options" }} />
+  <Tabs.Screen name="scanner" options={{ title: "Scan QR", tabBarStyle: { display: 'none' } }} />
+  <Tabs.Screen name="scan-options" options={{ title: "Scan Options", tabBarStyle: { display: 'none' } }} />
     </Tabs>
   );
 }

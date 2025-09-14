@@ -9,7 +9,13 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": false,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow camera access to scan QR codes to stop alarms.",
+        "NSPhotoLibraryAddUsageDescription": "Allow saving your QR code image to Photos.",
+        "NSPhotoLibraryUsageDescription": "Allow access to save and view QR images.",
+        "NSUserNotificationUsageDescription": "Allow notifications so alarms can ring while the app is not open."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +28,8 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.CAMERA"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.READ_MEDIA_IMAGES"
       ],
       "package": "com.anonymous.qralarmapp"
     },
@@ -44,7 +51,8 @@
           }
         }
       ],
-      "expo-barcode-scanner"
+      "expo-barcode-scanner",
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,

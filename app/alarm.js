@@ -4,11 +4,21 @@ import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
 import React, { useRef, useState } from "react";
 import { Alert, AppState, FlatList, Platform, StyleSheet, Switch, TextInput, TouchableOpacity, View } from "react-native";
+import PermissionsModal from "../components/permissions-modal";
 import { ThemedText } from "../components/themed-text";
 import { ThemedView } from "../components/themed-view";
 import { IconSymbol } from "../components/ui/icon-symbol";
 import { onAlarmStop } from "../src/lib/alarmBus";
 import { loadAlarms, saveAlarms } from "../src/lib/storage";
+
+// Ensure notifications show alerts and play sounds in foreground
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 function Wheel({ count, value, onChange, step = 1 }) {
   const data = Array.from({ length: count }, (_, i) => i * step);
@@ -55,10 +65,49 @@ function formatTime(date) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function hasRepeat(days) {
+  return Array.isArray(days) && days.some(Boolean);
+}
+
+// Compute the next occurrence for an alarm given hour/minute and selected weekdays (Sun..Sat)
+function computeNextOccurrence(hours, minutes, repeatDays, from = new Date()) {
+  const base = new Date(from);
+  base.setSeconds(0, 0);
+  if (hasRepeat(repeatDays)) {
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(base);
+      d.setDate(base.getDate() + i);
+      d.setHours(hours, minutes, 0, 0);
+      const dow = d.getDay(); // 0..6 Sun..Sat
+      if (repeatDays[dow] && d.getTime() > from.getTime()) return d;
+    }
+    // Fallback: next week same first selected day
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date(base);
+      d.setDate(base.getDate() + i);
+      d.setHours(hours, minutes, 0, 0);
+      const dow = d.getDay();
+      if (repeatDays[dow]) return d;
+    }
+  } else {
+    const d = new Date(base);
+    d.setHours(hours, minutes, 0, 0);
+    if (d.getTime() <= from.getTime()) d.setDate(d.getDate() + 1);
+    return d;
+  }
+  // default next day
+  const d = new Date(base);
+  d.setDate(base.getDate() + 1);
+  d.setHours(hours, minutes, 0, 0);
+  return d;
+}
+
 export default function AlarmScreen() {
   const [alarms, setAlarms] = useState([]);
   const [pendingAlarm, setPendingAlarm] = useState(null); // {id, time}
   const [ringVisible, setRingVisible] = useState(false);
+  const [ringNow, setRingNow] = useState(new Date());
+  const [permVisible, setPermVisible] = useState(true);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [pickerDate, setPickerDate] = useState(new Date());
   const [editorLabel, setEditorLabel] = useState("");
@@ -69,6 +118,38 @@ export default function AlarmScreen() {
   const alarmTimeout = useRef(null);
   const stoppedRef = useRef(false);
   const playingRef = useRef(null); // web Audio or expo-av Sound instance
+  const snoozeNotifRef = useRef(null);
+  // Android: setup default notification channel
+  React.useEffect(() => {
+    (async () => {
+      if (Platform.OS === 'android') {
+        try {
+          await Notifications.setNotificationChannelAsync('default', {
+            name: 'Alarm',
+            importance: Notifications.AndroidImportance.HIGH,
+            sound: 'default',
+            vibrationPattern: [250, 250, 250, 250],
+            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          });
+        } catch {}
+      }
+    })();
+  }, []);
+  const scheduleNotificationForAlarm = async (alarm) => {
+    try {
+      const id = await Notifications.scheduleNotificationAsync({
+        content: { title: '⏰ Alarm', body: alarm.label ? alarm.label : 'Alarm time', sound: 'default' },
+        trigger: alarm.time,
+      });
+      return id;
+    } catch {
+      return null;
+    }
+  };
+
+  const cancelNotificationForAlarm = async (alarm) => {
+    try { if (alarm.notificationId) await Notifications.cancelScheduledNotificationAsync(alarm.notificationId); } catch {}
+  };
 
   const getNextAlarm = (list) => {
     return list
@@ -101,6 +182,15 @@ export default function AlarmScreen() {
       },
       trigger: null, // fire immediately
     });
+    // pre-schedule a snooze in 2 minutes in case user doesn't scan
+    Notifications.scheduleNotificationAsync({
+      content: {
+        title: "⏰ Snooze",
+        body: "Alarm snoozed. Scan your QR to stop.",
+        sound: "default",
+      },
+      trigger: { seconds: 120 },
+    }).then((id) => { snoozeNotifRef.current = id; }).catch(() => {});
     // Navigate to scanner
   setTimeout(() => router.push("/scanner"), 500);
     // Try to play custom sound if available
@@ -124,6 +214,33 @@ export default function AlarmScreen() {
         }
       }
     } catch {}
+
+    // After firing, update scheduling for next occurrence
+    const hours = alarm.time.getHours();
+    const minutes = alarm.time.getMinutes();
+    if (hasRepeat(alarm.repeat)) {
+      const nextTime = computeNextOccurrence(hours, minutes, alarm.repeat, new Date(alarm.time.getTime() + 1000));
+      setAlarms(curr => {
+        const updated = curr.map(a => a.id === alarm.id ? { ...a, time: nextTime } : a);
+        saveAlarms(updated);
+        return updated;
+      });
+      scheduleNotificationForAlarm({ ...alarm, time: nextTime }).then((nid) => {
+        if (nid) setAlarms(curr => curr.map(a => a.id === alarm.id ? { ...a, notificationId: nid } : a));
+      });
+    } else {
+      // one-time alarm: disable after it rings
+      setAlarms(curr => {
+        const updated = curr.map(a => a.id === alarm.id ? { ...a, enabled: false } : a);
+        saveAlarms(updated);
+        return updated;
+      });
+    }
+    // reschedule in-app timer for next upcoming
+    setTimeout(() => {
+      // use latest alarms state
+      rescheduleNext(typeof alarms !== 'undefined' ? alarms : []);
+    }, 50);
   };
 
   // Show time picker to add an alarm
@@ -133,21 +250,21 @@ export default function AlarmScreen() {
   };
 
   const confirmPicker = () => {
-    const time = new Date(pickerDate);
-    time.setSeconds(0, 0);
-    // If time is in the past today, schedule for tomorrow
-    const now = new Date();
-    if (time <= now) {
-      time.setDate(time.getDate() + 1);
-    }
-    const alarm = { id: Date.now(), time, enabled: true, label: editorLabel, vibrate: editorVibrate, repeat: editorRepeat, sound: editorSound };
+    const hours = pickerDate.getHours();
+    const minutes = pickerDate.getMinutes();
+    const next = computeNextOccurrence(hours, minutes, editorRepeat);
+    const alarm = { id: Date.now(), time: next, enabled: true, label: editorLabel, vibrate: editorVibrate, repeat: editorRepeat, sound: editorSound, notificationId: null };
     setAlarms(prev => {
       const next = [...prev, alarm];
       saveAlarms(next);
       return next;
     });
-  // schedule next
-  rescheduleNext([...alarms, alarm]);
+    // OS notification for background
+    scheduleNotificationForAlarm(alarm).then((id) => {
+      if (id) setAlarms(curr => curr.map(a => a.id === alarm.id ? { ...a, notificationId: id } : a));
+    });
+    // also schedule local timeout for when app is foreground
+    rescheduleNext([...alarms, alarm]);
     setPickerVisible(false);
     setEditorLabel("");
     setEditorVibrate(true);
@@ -159,14 +276,32 @@ export default function AlarmScreen() {
 
   // Toggle alarm on/off
   const toggleAlarm = (id) => {
-    const updated = alarms.map(a => a.id === id ? { ...a, enabled: !a.enabled } : a);
+    let updated = alarms.map(a => a.id === id ? { ...a, enabled: !a.enabled } : a);
+    let target = updated.find(a => a.id === id);
+    // If enabling, ensure time is the next future occurrence
+    if (target?.enabled) {
+      const hrs = new Date(target.time).getHours();
+      const mins = new Date(target.time).getMinutes();
+      const nextTime = computeNextOccurrence(hrs, mins, target.repeat, new Date());
+      updated = updated.map(a => a.id === id ? { ...a, time: nextTime } : a);
+      target = { ...target, time: nextTime };
+    }
     setAlarms(updated);
     saveAlarms(updated);
+    if (target?.enabled) {
+      scheduleNotificationForAlarm(target).then((nid) => {
+        if (nid) setAlarms(curr => curr.map(a => a.id === id ? { ...a, notificationId: nid } : a));
+      });
+    } else {
+      cancelNotificationForAlarm(target);
+    }
     rescheduleNext(updated);
   };
 
   // Delete alarm
   const deleteAlarm = (id) => {
+    const target = alarms.find(a => a.id === id);
+    if (target) cancelNotificationForAlarm(target);
     const updated = alarms.filter(a => a.id !== id);
     setAlarms(updated);
     saveAlarms(updated);
@@ -179,10 +314,21 @@ export default function AlarmScreen() {
 
   // Listen for app coming to foreground (simulate snooze if not stopped)
   React.useEffect(() => {
+    if (!ringVisible) return;
+    const t = setInterval(() => setRingNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, [ringVisible]);
+
+  React.useEffect(() => {
     const off = onAlarmStop(() => {
       // mark as stopped and clear pending
       stoppedRef.current = true;
       setPendingAlarm(null);
+      // cancel any scheduled snooze
+      if (snoozeNotifRef.current) {
+        try { Notifications.cancelScheduledNotificationAsync(snoozeNotifRef.current); } catch {}
+        snoozeNotifRef.current = null;
+      }
       if (alarmTimeout.current) {
         clearTimeout(alarmTimeout.current);
         alarmTimeout.current = null;
@@ -203,15 +349,7 @@ export default function AlarmScreen() {
     });
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active' && pendingAlarm && !stoppedRef.current) {
-        // If alarm is still pending, snooze for 2 min
-        Notifications.scheduleNotificationAsync({
-          content: {
-            title: "⏰ Alarm Snoozed!",
-            body: "Scan your QR code to stop.",
-            sound: "default",
-          },
-          trigger: { seconds: 120 },
-        });
+        // Dismiss overlay when user returns without scanning; snooze already scheduled on ring
         setPendingAlarm(null);
         setRingVisible(false);
       }
@@ -220,14 +358,51 @@ export default function AlarmScreen() {
     // We intentionally only depend on pendingAlarm here
   }, [pendingAlarm]);
 
+  // Bring user to scan when notification arrives or is tapped
+  React.useEffect(() => {
+    const respSub = Notifications.addNotificationResponseReceivedListener(() => {
+      try {
+        setRingVisible(true);
+        setPendingAlarm(curr => curr || { id: 'notif', time: new Date(), label: 'Alarm' });
+        router.push('/scan-options');
+      } catch {}
+    });
+    const recvSub = Notifications.addNotificationReceivedListener(() => {
+      try {
+        if (AppState.currentState === 'active') {
+          const next = getNextAlarm(alarms);
+          if (next) ringAlarm(next);
+        }
+      } catch {}
+    });
+    return () => { respSub.remove(); recvSub.remove(); };
+  }, [alarms]);
+
   // Load persisted alarms
   React.useEffect(() => {
     (async () => {
+      try { await Notifications.cancelAllScheduledNotificationsAsync(); } catch {}
       const stored = await loadAlarms();
       if (stored.length) {
-        setAlarms(stored);
-        // schedule next alarm from stored
-        rescheduleNext(stored);
+        // Adjust any past times to their next occurrence
+        const adjusted = stored.map(a => {
+          const hrs = new Date(a.time).getHours();
+          const mins = new Date(a.time).getMinutes();
+          const nextTime = computeNextOccurrence(hrs, mins, a.repeat, new Date());
+          // If already in future and same day matches desired, keep
+          if (new Date(a.time).getTime() > Date.now()) return a;
+          return { ...a, time: nextTime };
+        });
+        setAlarms(adjusted);
+        saveAlarms(adjusted);
+        // schedule OS notifications for enabled alarms
+        adjusted.filter(a => a.enabled).forEach(a => {
+          scheduleNotificationForAlarm(a).then((nid) => {
+            if (nid) setAlarms(curr => curr.map(x => x.id === a.id ? { ...x, notificationId: nid } : x));
+          });
+        });
+        // schedule in-app next timeout
+        rescheduleNext(adjusted);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -401,15 +576,19 @@ export default function AlarmScreen() {
 
       {ringVisible && pendingAlarm && (
         <View style={styles.ringOverlay}>
-          <ThemedText style={styles.ringTime}>{formatTime(pendingAlarm.time)}</ThemedText>
+          <ThemedText style={styles.ringTime}>{ringNow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</ThemedText>
           {!!pendingAlarm.label && (
             <ThemedText style={styles.ringLabel}>{pendingAlarm.label}</ThemedText>
           )}
-          <TouchableOpacity onPress={() => router.push('/scan-options')} style={styles.ringBtn}>
-            <ThemedText style={{ color: '#000', fontWeight: '700' }}>Scan QR to Stop</ThemedText>
-          </TouchableOpacity>
+          <View style={styles.ringBottomZone}>
+            <TouchableOpacity onPress={() => router.push('/scan-options')} activeOpacity={0.8}>
+              <ThemedText style={styles.ringCtaText}>Scan QR to Stop</ThemedText>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
+
+      <PermissionsModal visible={permVisible} onClose={() => setPermVisible(false)} onAllGranted={() => setPermVisible(false)} />
     </ThemedView>
   );
 }
@@ -492,7 +671,7 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.92)',
+    backgroundColor: '#000',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -510,11 +689,18 @@ const styles = StyleSheet.create({
     fontSize: 18,
     marginBottom: 8,
   },
-  ringBtn: {
-    backgroundColor: '#ffb26b',
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    marginTop: 8,
+  ringBottomZone: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 36,
+    alignItems: 'center',
+  },
+  ringCtaText: {
+    color: '#ffb26b',
+    fontSize: 18,
+    fontWeight: '700',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
   },
 });

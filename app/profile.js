@@ -44,32 +44,41 @@ export default function ProfileScreen() {
           <TouchableOpacity
             onPress={async () => {
               try {
-                if (Platform.OS === 'web') {
-                  const data = await new Promise((resolve, reject) => {
-                    try { qrRef.current?.toDataURL((d) => resolve(d)); } catch (e) { reject(e); }
-                  });
-                  const a = document.createElement('a');
-                  a.href = data; a.download = `${name || 'qr'}.png`; a.click();
-                  return;
-                }
-                const Sharing = require('expo-sharing');
-                const FileSystem = require('expo-file-system');
-                const data = await new Promise((resolve, reject) => {
+                // Get PNG data from QR component
+                const dataUrl = await new Promise((resolve, reject) => {
                   try { qrRef.current?.toDataURL((d) => resolve(d)); } catch (e) { reject(e); }
                 });
-                const base64 = data.replace(/^data:image\/png;base64,/, '');
+                if (!dataUrl) return;
+
+                if (Platform.OS === 'web') {
+                  const a = document.createElement('a');
+                  a.href = dataUrl; a.download = `${name || 'qr'}.png`; a.click();
+                  return;
+                }
+
+                const FileSystem = require('expo-file-system');
+                const MediaLibrary = require('expo-media-library');
+                // Strip prefix and write to cache
+                const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
                 const fileUri = FileSystem.cacheDirectory + `${name || 'qr'}.png`;
                 await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-                if (await Sharing.isAvailableAsync()) {
-                  await Sharing.shareAsync(fileUri, { dialogTitle: 'Share QR Code' });
+
+                // Ask for permission and save to gallery
+                const { status } = await MediaLibrary.requestPermissionsAsync();
+                if (status !== 'granted') {
+                  alert('Permission needed to save to gallery.');
+                  return;
                 }
+                await MediaLibrary.saveToLibraryAsync(fileUri);
+                alert('QR saved to your Photos/Gallery.');
               } catch (e) {
-                console.warn('QR download/share failed', e);
+                console.warn('QR save failed', e);
+                alert('Failed to save QR.');
               }
             }}
             style={{ marginTop: 12, backgroundColor: '#0a7ea4', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16 }}
           >
-            <ThemedText style={{ color: '#fff', fontWeight: '600' }}>Download QR</ThemedText>
+            <ThemedText style={{ color: '#fff', fontWeight: '600' }}>Save to Photos</ThemedText>
           </TouchableOpacity>
         </View>
       ) : null}
