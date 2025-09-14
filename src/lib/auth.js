@@ -1,14 +1,29 @@
 import { supabase } from './supabase';
 
 export async function signUp(email, password) {
-  const { data, error } = await supabase.auth.signUp({ email, password });
-  if (error) throw error;
+  const { data, error } = await supabase.auth.signUp({ 
+    email, 
+    password
+  });
+  
+  if (error) {
+    console.log('SignUp Error:', error);
+    throw error;
+  }
+  
+  console.log('SignUp Success:', data);
   return data;
 }
 
 export async function signIn(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw error;
+  
+  if (error) {
+    console.log('SignIn Error:', error);
+    throw error;
+  }
+  
+  console.log('SignIn Success:', data);
   return data;
 }
 
@@ -32,16 +47,14 @@ export function onAuthStateChange(callback) {
   return () => data.subscription.unsubscribe();
 }
 
-export async function resetPassword(email, redirectTo = 'qralarmapp://auth-callback') {
+export async function resetPassword(email) {
+  // For web/localhost development, use localhost URL
+  // For production, this should be your app's domain
+  const redirectTo = 'http://localhost:3000/reset-password';
+  
   const { data, error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
   if (error) throw error;
   return data;
 }
 
-export async function resendConfirmation(email) {
-  if (!email) throw new Error('Email required');
-  // Supabase v2: resend magic link or confirmation
-  const { data, error } = await supabase.auth.resend({ type: 'signup', email });
-  if (error) throw error;
-  return data;
-}
+

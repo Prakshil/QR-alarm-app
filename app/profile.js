@@ -4,7 +4,7 @@ import { Alert, Platform, TextInput, TouchableOpacity, View } from "react-native
 import QRCode from "react-native-qrcode-svg";
 import { ThemedText } from "../components/themed-text";
 import { ThemedView } from "../components/themed-view";
-import { getSession, resendConfirmation, resetPassword, signIn, signOut, signUp } from "../src/lib/auth";
+import { getSession, resetPassword, signIn, signOut, signUp } from "../src/lib/auth";
 import { createProfileRow } from "../src/lib/db";
 import { saveMyQrCode } from "../src/lib/storage";
 
@@ -39,11 +39,26 @@ export default function ProfileScreen() {
     
     setLoading(true);
     try {
-      const { session, error } = await signIn(email, password);
-      if (error) throw error;
-      setSession(session);
+      console.log('Attempting sign in for:', email);
+      const signInResult = await signIn(email, password);
+      console.log('Sign in result:', signInResult);
+      
+      if (signInResult.session) {
+        setSession(signInResult.session);
+        Alert.alert("Success", "Signed in successfully!");
+      } else {
+        Alert.alert("Error", "Failed to sign in. Please check your credentials.");
+      }
     } catch (error) {
-      Alert.alert("Sign In Error", error.message);
+      console.log('Sign in error:', error);
+      
+      if (error.message.includes('Invalid login credentials')) {
+        Alert.alert("Sign In Error", "Invalid email or password. Please check your credentials.");
+      } else if (error.message.includes('Email not confirmed')) {
+        Alert.alert("Email Not Confirmed", "Please check your email and confirm your account first.");
+      } else {
+        Alert.alert("Sign In Error", error.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -57,18 +72,51 @@ export default function ProfileScreen() {
     
     setLoading(true);
     try {
-      const { session, error } = await signUp(email, password);
-      if (error) throw error;
+      console.log('Attempting signup for:', email);
+      const signUpResult = await signUp(email, password);
       
-      if (session) {
+      console.log('Signup result:', signUpResult);
+      
+      // Check if we got a session directly from signup
+      if (signUpResult.session) {
+        console.log('Got session from signup');
         // Create profile row for new user
-        await createProfileRow(session.user.id);
-        setSession(session);
-      } else {
-        Alert.alert("Success", "Please check your email to confirm your account");
+        await createProfileRow(signUpResult.session.user.id);
+        setSession(signUpResult.session);
+        Alert.alert("Success", "Account created! You can now generate your QR code.");
+      } else if (signUpResult.user && !signUpResult.session) {
+        console.log('User created but no session, trying to sign in');
+        // User was created but no session (email confirmation might be required)
+        // Try to sign in immediately
+        try {
+          const signInResult = await signIn(email, password);
+          console.log('Sign in result:', signInResult);
+          
+          if (signInResult.session) {
+            await createProfileRow(signInResult.session.user.id);
+            setSession(signInResult.session);
+            Alert.alert("Success", "Account created! You can now generate your QR code.");
+          } else {
+            // No session but user exists, might need confirmation
+            Alert.alert("Account Created", "Please check your email for confirmation, then sign in.");
+            setIsSignUp(false);
+          }
+        } catch (signInError) {
+          console.log('Auto sign in failed:', signInError);
+          Alert.alert("Account Created", "Please try signing in with your credentials.");
+          setIsSignUp(false);
+        }
       }
     } catch (error) {
-      Alert.alert("Sign Up Error", error.message);
+      console.log('Signup error:', error);
+      
+      // Check if user already exists
+      if (error.message.includes('already registered') || error.message.includes('already been taken')) {
+        Alert.alert("Error", "Email already exists. Please try signing in instead.");
+        setIsSignUp(false);
+      } else {
+        Alert.alert("Sign Up Error", error.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -89,20 +137,7 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleResendConfirmation = async () => {
-    if (!email) {
-      Alert.alert("Error", "Please enter your email first");
-      return;
-    }
-    
-    try {
-      const { error } = await resendConfirmation(email);
-      if (error) throw error;
-      Alert.alert("Success", "Confirmation email sent");
-    } catch (error) {
-      Alert.alert("Error", error.message);
-    }
-  };
+
 
   const handleSignOut = async () => {
     try {
@@ -231,21 +266,15 @@ export default function ProfileScreen() {
           </ThemedText>
         </TouchableOpacity>
         
-        <View style={{ flexDirection: 'row', justifyContent: 'space-around', width: '100%' }}>
+        {/* Only show Forgot Password for Sign In mode */}
+        {!isSignUp && (
           <TouchableOpacity
-            style={{ backgroundColor: '#333', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16 }}
+            style={{ backgroundColor: '#333', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 20, marginTop: 8 }}
             onPress={handleResetPassword}
           >
-            <ThemedText style={{ color: '#fff', fontSize: 14 }}>Reset Password</ThemedText>
+            <ThemedText style={{ color: '#fff', fontSize: 14 }}>Forgot Password?</ThemedText>
           </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={{ backgroundColor: '#333', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16 }}
-            onPress={handleResendConfirmation}
-          >
-            <ThemedText style={{ color: '#fff', fontSize: 14 }}>Resend Confirmation</ThemedText>
-          </TouchableOpacity>
-        </View>
+        )}
       </ThemedView>
     );
   }
