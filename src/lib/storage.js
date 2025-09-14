@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const KEY = 'alarms.v1';
+const MY_QR_KEY = 'my.qr.v1';
 
 export async function loadAlarms() {
   try {
@@ -18,4 +19,12 @@ export async function saveAlarms(alarms) {
   try {
     await AsyncStorage.setItem(KEY, JSON.stringify(alarms));
   } catch {}
+}
+
+export async function saveMyQrCode(code) {
+  try { await AsyncStorage.setItem(MY_QR_KEY, code || ''); } catch {}
+}
+
+export async function loadMyQrCode() {
+  try { const v = await AsyncStorage.getItem(MY_QR_KEY); return v || ''; } catch { return ''; }
 }

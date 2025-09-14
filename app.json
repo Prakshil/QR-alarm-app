@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "qralarmapp",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
       "infoPlist": {

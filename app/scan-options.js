@@ -1,3 +1,4 @@
+import React from 'react';
 import { Alert, Image, Platform, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from '../components/themed-text';
 import { ThemedView } from '../components/themed-view';
@@ -10,10 +11,19 @@ try { FileSystem = require('expo-file-system'); } catch {}
 try { Sharing = require('expo-sharing'); } catch {}
 
 import { useRouter } from 'expo-router';
-import { supabase } from '../src/lib/supabase';
+import { getSession } from '../src/lib/auth';
+import { verifyQr } from '../src/lib/db';
+import { loadMyQrCode } from '../src/lib/storage';
 
 export default function ScanOptionsScreen() {
   const router = useRouter();
+  // require auth
+  React.useEffect(() => {
+    (async () => {
+      const session = await getSession();
+      if (!session) router.replace('/auth');
+    })();
+  }, []);
 
   const onUpload = async () => {
     try {
@@ -32,9 +42,18 @@ export default function ScanOptionsScreen() {
       } else {
         const DocumentPicker = require('expo-document-picker');
         const res = await DocumentPicker.getDocumentAsync({ type: 'image/*', copyToCacheDirectory: true });
+        if (res.canceled) return;
         const uri = res?.assets?.[0]?.uri;
         if (!uri) return;
-        const QRLocalImage = require('react-native-qrcode-local-image');
+        let QRLocalImage = null;
+        try { QRLocalImage = require('react-native-qrcode-local-image'); } catch {}
+        if (!QRLocalImage?.decode) {
+          Alert.alert(
+            'Unsupported in Expo Go',
+            'Decoding a QR from an image requires a development build. Please use the camera option for now.'
+          );
+          return;
+        }
         const decoded = await QRLocalImage.decode(uri);
         await verifyAndStop(decoded);
       }
@@ -46,8 +65,17 @@ export default function ScanOptionsScreen() {
   const verifyAndStop = async (data) => {
     try {
       if (!data) return Alert.alert('No QR found', 'Could not read a QR from the image.');
-      const { data: profiles } = await supabase.from('profiles').select('*').eq('qr_code', data);
-      if (profiles && profiles.length > 0) {
+      const my = await loadMyQrCode();
+      if (!my) {
+        Alert.alert('No profile QR', 'Create your profile first to bind a QR to this device.');
+        return;
+      }
+      if (data !== my) {
+        Alert.alert('❌ Not your QR', 'This QR belongs to another user or device.');
+        return;
+      }
+      const row = await verifyQr(data);
+      if (row) {
         const { emitAlarmStop } = require('../src/lib/alarmBus');
         emitAlarmStop();
         Alert.alert('✅ Success', 'Alarm stopped!');

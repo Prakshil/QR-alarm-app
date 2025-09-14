@@ -14,7 +14,8 @@ import { loadAlarms, saveAlarms } from "../src/lib/storage";
 // Ensure notifications show alerts and play sounds in foreground
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),
@@ -78,7 +79,7 @@ function computeNextOccurrence(hours, minutes, repeatDays, from = new Date()) {
       const d = new Date(base);
       d.setDate(base.getDate() + i);
       d.setHours(hours, minutes, 0, 0);
-      const dow = d.getDay(); // 0..6 Sun..Sat
+      const dow = d.getDay(); 
       if (repeatDays[dow] && d.getTime() > from.getTime()) return d;
     }
     // Fallback: next week same first selected day
@@ -139,7 +140,7 @@ export default function AlarmScreen() {
     try {
       const id = await Notifications.scheduleNotificationAsync({
         content: { title: '⏰ Alarm', body: alarm.label ? alarm.label : 'Alarm time', sound: 'default' },
-        trigger: alarm.time,
+        trigger: { type: 'date', date: alarm.time },
       });
       return id;
     } catch {
@@ -191,8 +192,10 @@ export default function AlarmScreen() {
       },
       trigger: { seconds: 120 },
     }).then((id) => { snoozeNotifRef.current = id; }).catch(() => {});
-    // Navigate to scanner
-  setTimeout(() => router.push("/scanner"), 500);
+    // Navigate to scan-options after component mount
+    setTimeout(() => {
+      try { router.push("/scan-options"); } catch {}
+    }, 1000);
     // Try to play custom sound if available
     try {
       if (alarm.sound?.uri) {

@@ -40,7 +40,10 @@ export default function PermissionsModal({ visible, onClose, onAllGranted }) {
   useEffect(() => { if (visible) refresh(); }, [visible]);
 
   useEffect(() => {
-    if (notif === 'granted' && camera === 'granted' && media === 'granted') {
+    // In a perfect world we want all three; in Expo Go, camera/media may not fully grant.
+    const allGranted = notif === 'granted' && camera === 'granted' && media === 'granted';
+    const criticalGranted = notif === 'granted';
+    if (allGranted || criticalGranted) {
       onAllGranted?.();
       onClose?.();
     }
@@ -50,7 +53,9 @@ export default function PermissionsModal({ visible, onClose, onAllGranted }) {
     try { await Notifications.requestPermissionsAsync(); } catch {}
     try { if (BarCodeScanner) await BarCodeScanner.requestPermissionsAsync(); } catch {}
     try { if (MediaLibrary) await MediaLibrary.requestPermissionsAsync(); } catch {}
-    refresh();
+    await refresh();
+    // Close regardless to avoid trapping users in Expo Go; backend checks will prompt again if missing later
+    onClose?.();
   };
 
   const openSettings = () => Linking.openSettings();
@@ -82,6 +87,9 @@ export default function PermissionsModal({ visible, onClose, onAllGranted }) {
           </TouchableOpacity>
           <TouchableOpacity onPress={openSettings} style={{ padding: 12, alignItems: 'center' }}>
             <ThemedText style={{ color: '#0a7ea4' }}>Open Settings</ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onClose} style={{ padding: 8, alignItems: 'center' }}>
+            <ThemedText style={{ color: '#8b8f93' }}>Skip for now</ThemedText>
           </TouchableOpacity>
         </ThemedView>
       </View>

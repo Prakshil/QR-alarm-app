@@ -1,9 +1,12 @@
+import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Alert, View } from "react-native";
 import { ThemedText } from "../components/themed-text";
 import { ThemedView } from "../components/themed-view";
 import { emitAlarmStop } from "../src/lib/alarmBus";
-import { supabase } from "../src/lib/supabase";
+import { getSession } from "../src/lib/auth";
+import { verifyQr } from "../src/lib/db";
+import { loadMyQrCode } from "../src/lib/storage";
 let BarCodeScannerModule = null;
 try {
   // Delay requiring native module until runtime to avoid crash if not available in Expo Go
@@ -11,11 +14,14 @@ try {
 } catch {}
 
 export default function ScannerScreen() {
+  const router = useRouter();
   const [hasPermission, setHasPermission] = useState(null);
   const BarCodeScanner = BarCodeScannerModule?.BarCodeScanner;
 
   useEffect(() => {
     (async () => {
+      const session = await getSession();
+      if (!session) return router.replace('/auth');
       if (!BarCodeScanner) return setHasPermission(false);
       const { status } = await BarCodeScanner.requestPermissionsAsync();
       setHasPermission(status === "granted");
@@ -23,16 +29,25 @@ export default function ScannerScreen() {
   }, []);
 
   const handleScan = async ({ data }) => {
-    let { data: profiles } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("qr_code", data);
-
-    if (profiles && profiles.length > 0) {
-      emitAlarmStop();
-      Alert.alert("✅ Success", "Alarm Stopped!");
-    } else {
-      Alert.alert("❌ Invalid", "Wrong QR Code!");
+    try {
+      const my = await loadMyQrCode();
+      if (!my) {
+        Alert.alert('No profile QR', 'Create your profile first to bind a QR to this device.');
+        return;
+      }
+      if (data !== my) {
+        Alert.alert('❌ Not your QR', 'This QR belongs to another user or device.');
+        return;
+      }
+      const row = await verifyQr(data);
+      if (row) {
+        emitAlarmStop();
+        Alert.alert("✅ Success", "Alarm Stopped!");
+      } else {
+        Alert.alert("❌ Invalid", "Wrong QR Code!");
+      }
+    } catch (e) {
+      Alert.alert('Error', e?.message || String(e));
     }
   };
 
