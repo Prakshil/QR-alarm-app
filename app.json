@@ -32,7 +32,9 @@
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_MEDIA_AUDIO",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_EXTERNAL_STORAGE"
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.ACCESS_MEDIA_LOCATION"
       ],
       "package": "com.anonymous.qralarmapp"
     },
@@ -41,6 +43,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "expo-dev-client",
       "expo-router",
       [
         "expo-splash-screen",
@@ -55,6 +58,7 @@
         }
       ],
       "expo-barcode-scanner",
+      "expo-image-picker",
       "expo-notifications",
       [
         "expo-media-library",
@@ -68,6 +72,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c7701675-a10e-4515-980a-ac8300049c69"
+      }
     }
   }
 }
